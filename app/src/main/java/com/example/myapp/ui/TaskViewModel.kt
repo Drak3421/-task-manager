@@ -30,6 +30,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.encodeToString
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -144,6 +146,12 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _isPublishingUpdate = MutableStateFlow(false)
     val isPublishingUpdate: StateFlow<Boolean> = _isPublishingUpdate.asStateFlow()
+
+    private val _registeredUsers = MutableStateFlow<List<String>>(emptyList())
+    val registeredUsers: StateFlow<List<String>> = _registeredUsers.asStateFlow()
+
+    private val _isFetchingRegisteredUsers = MutableStateFlow(false)
+    val isFetchingRegisteredUsers: StateFlow<Boolean> = _isFetchingRegisteredUsers.asStateFlow()
 
     val youtubeChannels = preferencesManager.youtubeChannelsFlow
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -326,9 +334,13 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
             myUsername.collect { username ->
                 if (username.isNotEmpty()) {
                     startNtfyListener(username)
+                    startPresenceHeartbeat(username)
+                    startFriendsPresenceCheck()
                     syncWithServer()
                 } else {
                     sseJob?.cancel()
+                    presenceJob?.cancel()
+                    friendsPresenceJob?.cancel()
                 }
             }
         }
@@ -2982,6 +2994,7 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
                     sendSseSignal(targetUsername, "force_logout")
                     
                     withContext(Dispatchers.Main) {
+                        _registeredUsers.value = _registeredUsers.value.filter { !it.equals(targetUsername, ignoreCase = true) }
                         onResult(true, null)
                     }
                 } else {
@@ -2994,6 +3007,72 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
                 withContext(Dispatchers.Main) {
                     onResult(false, e.message ?: "Network error occurred")
                 }
+            }
+        }
+    }
+
+    fun fetchAllRegisteredUsers() {
+        viewModelScope.launch(Dispatchers.IO) {
+            _isFetchingRegisteredUsers.value = true
+            try {
+                val raw = getRemoteValue("all_registered_users")
+                if (raw.isNotEmpty()) {
+                    val list = Json.decodeFromString<List<String>>(decodeBase64(raw))
+                    _registeredUsers.value = list
+                } else {
+                    _registeredUsers.value = emptyList()
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            } finally {
+                _isFetchingRegisteredUsers.value = false
+            }
+        }
+    }
+
+    private var presenceJob: Job? = null
+    private fun startPresenceHeartbeat(username: String) {
+        presenceJob?.cancel()
+        presenceJob = viewModelScope.launch(Dispatchers.IO) {
+            while (isActive) {
+                updateRemoteValue("presence_${username.lowercase()}", System.currentTimeMillis().toString())
+                delay(30000)
+            }
+        }
+    }
+
+    private var friendsPresenceJob: Job? = null
+    private fun startFriendsPresenceCheck() {
+        friendsPresenceJob?.cancel()
+        friendsPresenceJob = viewModelScope.launch(Dispatchers.IO) {
+            while (isActive) {
+                val myName = myUsername.value
+                if (myName.isNotEmpty()) {
+                    val localFriends = preferencesManager.friendsFlow.firstOrNull() ?: emptyList()
+                    if (localFriends.isNotEmpty()) {
+                        try {
+                            val updated = coroutineScope {
+                                localFriends.map { friend ->
+                                    async {
+                                        val rawPresence = getRemoteValue("presence_${friend.username.lowercase()}")
+                                        val lastActiveTime = rawPresence.toLongOrNull() ?: 0L
+                                        val isOnline = System.currentTimeMillis() - lastActiveTime < 60000L
+                                        val statusStr = if (isOnline) "Online" else "Offline"
+                                        friend.copy(status = statusStr)
+                                    }
+                                }.map { it.await() }
+                            }
+                            if (updated != localFriends) {
+                                withContext(Dispatchers.Main) {
+                                    preferencesManager.saveFriends(updated)
+                                }
+                            }
+                        } catch (e: Exception) {
+                            e.printStackTrace()
+                        }
+                    }
+                }
+                delay(30000)
             }
         }
     }
@@ -3192,6 +3271,8 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
         super.onCleared()
         sseJob?.cancel()
         otaSseJob?.cancel()
+        presenceJob?.cancel()
+        friendsPresenceJob?.cancel()
         musicPlayerManager.release()
     }
 }

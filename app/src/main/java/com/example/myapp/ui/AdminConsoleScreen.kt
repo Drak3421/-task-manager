@@ -13,6 +13,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Publish
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -125,6 +126,12 @@ fun AdminConsoleScreen(
     }
 
     // Admin Panel Screen (Unlocked)
+    LaunchedEffect(Unit) {
+        viewModel.fetchAllRegisteredUsers()
+    }
+    val registeredUsers by viewModel.registeredUsers.collectAsState()
+    val isFetchingUsers by viewModel.isFetchingRegisteredUsers.collectAsState()
+
     var versionCodeStr by remember { mutableStateOf("") }
     var downloadUrlStr by remember { mutableStateOf("") }
 
@@ -246,54 +253,103 @@ fun AdminConsoleScreen(
             )
             Spacer(modifier = Modifier.height(24.dp))
 
-            var targetUsername by remember { mutableStateOf("") }
+            var deleteSearchQuery by remember { mutableStateOf("") }
+            var userToDelete by remember { mutableStateOf<String?>(null) }
             var isDeleting by remember { mutableStateOf(false) }
-            var showConfirmDialog by remember { mutableStateOf(false) }
 
             OutlinedTextField(
-                value = targetUsername,
-                onValueChange = { targetUsername = it },
-                label = { Text("Username to Delete") },
-                placeholder = { Text("e.g. johndoe") },
+                value = deleteSearchQuery,
+                onValueChange = { deleteSearchQuery = it },
+                label = { Text("Filter Usernames") },
+                placeholder = { Text("Search by username...") },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth()
             )
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
-            if (isDeleting) {
-                CircularProgressIndicator(color = MaterialTheme.colorScheme.error)
-            } else {
-                Button(
-                    onClick = {
-                        if (targetUsername.trim().isEmpty()) {
-                            Toast.makeText(context, "Please enter a username", Toast.LENGTH_SHORT).show()
-                            return@Button
-                        }
-                        showConfirmDialog = true
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp)
+            if (isFetchingUsers) {
+                Box(
+                    modifier = Modifier.fillMaxWidth().height(100.dp),
+                    contentAlignment = Alignment.Center
                 ) {
-                    Text("Delete User Account", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+                }
+            } else {
+                val filteredUsers = registeredUsers.filter {
+                    it.contains(deleteSearchQuery, ignoreCase = true)
+                }
+
+                if (filteredUsers.isEmpty()) {
+                    Text(
+                        text = "No users found",
+                        fontSize = 14.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(vertical = 16.dp)
+                    )
+                } else {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(8.dp)
+                        ) {
+                            filteredUsers.forEachIndexed { index, user ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 8.dp, horizontal = 12.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text(
+                                        text = "@$user",
+                                        fontSize = 16.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    IconButton(
+                                        onClick = { userToDelete = user }
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Delete,
+                                            contentDescription = "Delete User",
+                                            tint = MaterialTheme.colorScheme.error
+                                        )
+                                    }
+                                }
+                                if (index < filteredUsers.lastIndex) {
+                                    HorizontalDivider(
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.1f),
+                                        modifier = Modifier.padding(horizontal = 12.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
             }
 
-            if (showConfirmDialog) {
+            if (isDeleting) {
+                Spacer(modifier = Modifier.height(16.dp))
+                CircularProgressIndicator(color = MaterialTheme.colorScheme.error)
+            }
+
+            userToDelete?.let { targetUser ->
                 AlertDialog(
-                    onDismissRequest = { showConfirmDialog = false },
+                    onDismissRequest = { userToDelete = null },
                     title = { Text("Permanently Delete User?") },
-                    text = { Text("Are you sure you want to delete the user '@${targetUsername.trim()}'? This action is irreversible and will force-logout the user immediately.") },
+                    text = { Text("Are you sure you want to delete the user '@$targetUser'? This action is irreversible and will force-logout the user immediately.") },
                     confirmButton = {
                         Button(
                             onClick = {
-                                showConfirmDialog = false
+                                userToDelete = null
                                 isDeleting = true
-                                viewModel.adminDeleteUser(targetUsername.trim()) { success, err ->
+                                viewModel.adminDeleteUser(targetUser) { success, err ->
                                     isDeleting = false
                                     if (success) {
-                                        Toast.makeText(context, "User '@$targetUsername' deleted successfully!", Toast.LENGTH_SHORT).show()
-                                        targetUsername = ""
+                                        Toast.makeText(context, "User '@$targetUser' deleted successfully!", Toast.LENGTH_SHORT).show()
                                     } else {
                                         Toast.makeText(context, "Deletion failed: $err", Toast.LENGTH_LONG).show()
                                     }
@@ -305,7 +361,7 @@ fun AdminConsoleScreen(
                         }
                     },
                     dismissButton = {
-                        TextButton(onClick = { showConfirmDialog = false }) {
+                        TextButton(onClick = { userToDelete = null }) {
                             Text("Cancel")
                         }
                     }
