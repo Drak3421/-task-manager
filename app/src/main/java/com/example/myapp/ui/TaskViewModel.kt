@@ -1108,7 +1108,13 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
             if (connection.responseCode == HttpURLConnection.HTTP_OK) {
                 val responseText = connection.inputStream.bufferedReader().use { it.readText() }.trim()
                 val cleaned = responseText.removeSurrounding("\"")
-                if (cleaned == "null") "" else cleaned
+                if (cleaned == "null") "" else {
+                    try {
+                        java.net.URLDecoder.decode(cleaned, "UTF-8")
+                    } catch (e: Exception) {
+                        cleaned
+                    }
+                }
             } else {
                 ""
             }
@@ -2150,6 +2156,14 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
                                             } ?: emptyList()
                                             preferencesManager.saveChatMessages(currentMessages)
                                         }
+                                    } else if (chatMsg.id.startsWith("force_logout_")) {
+                                        withContext(Dispatchers.Main) {
+                                            preferencesManager.saveMyUsername("")
+                                            preferencesManager.saveFriends(emptyList())
+                                            preferencesManager.saveChatMessages(emptyList())
+                                            preferencesManager.saveIncomingRequests(emptyList())
+                                            preferencesManager.saveSentRequests(emptyList())
+                                        }
                                     } else {
                                         handleIncomingMessage(chatMsg)
                                     }
@@ -2896,6 +2910,90 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
                 }
             } finally {
                 connection?.disconnect()
+            }
+        }
+    }
+
+    fun adminDeleteUser(targetUsername: String, onResult: (Boolean, String?) -> Unit) {
+        val targetLower = targetUsername.trim().lowercase()
+        if (targetLower.isEmpty()) {
+            onResult(false, "Username cannot be empty")
+            return
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            var connection: HttpURLConnection? = null
+            try {
+                // 1. Release username: set user_{targetLower} to "deleted"
+                val url = URL("https://keyvalue.immanuel.co/api/KeyVal/UpdateValue/jsi08n3r/user_$targetLower/deleted")
+                connection = (url.openConnection() as HttpURLConnection).apply {
+                    readTimeout = 8000
+                    connectTimeout = 8000
+                    requestMethod = "POST"
+                    doOutput = true
+                    setRequestProperty("Content-Length", "0")
+                }
+                connection.connect()
+                val code = connection.responseCode
+                connection.disconnect()
+                
+                if (code == HttpURLConnection.HTTP_OK) {
+                    // 2. Remove from global registered users list
+                    val rawReg = getRemoteValue("all_registered_users")
+                    if (rawReg.isNotEmpty()) {
+                        try {
+                            val regList = Json.decodeFromString<List<String>>(decodeBase64(rawReg)).toMutableList()
+                            val iterator = regList.iterator()
+                            while (iterator.hasNext()) {
+                                if (iterator.next().equals(targetUsername, ignoreCase = true)) {
+                                    iterator.remove()
+                                }
+                            }
+                            val encodedReg = encodeBase64(Json.encodeToString(regList))
+                            updateRemoteValue("all_registered_users", encodedReg)
+                        } catch (e: Exception) {
+                            e.printStackTrace()
+                        }
+                    }
+                    
+                    // 3. Clean up friendships (remove target user from friends' lists)
+                    val rawFriends = getRemoteValue("friends_$targetLower")
+                    if (rawFriends.isNotEmpty()) {
+                        try {
+                            val friendsList = Json.decodeFromString<List<String>>(decodeBase64(rawFriends))
+                            friendsList.forEach { friendName ->
+                                val rawBFriends = getRemoteValue("friends_${friendName.lowercase()}")
+                                if (rawBFriends.isNotEmpty()) {
+                                    val bFriendsList = Json.decodeFromString<List<String>>(decodeBase64(rawBFriends)).toMutableList()
+                                    bFriendsList.removeIf { it.equals(targetUsername, ignoreCase = true) }
+                                    updateRemoteValue("friends_${friendName.lowercase()}", encodeBase64(Json.encodeToString(bFriendsList)))
+                                }
+                                sendSseSignal(friendName, "friend_unfriend")
+                            }
+                        } catch (e: Exception) {
+                            e.printStackTrace()
+                        }
+                    }
+                    
+                    // 4. Reset target user's remote files
+                    updateRemoteValue("friends_$targetLower", encodeBase64("[]"))
+                    updateRemoteValue("friend_requests_$targetLower", encodeBase64("[]"))
+                    
+                    // 5. Send force logout SSE signal
+                    sendSseSignal(targetUsername, "force_logout")
+                    
+                    withContext(Dispatchers.Main) {
+                        onResult(true, null)
+                    }
+                } else {
+                    withContext(Dispatchers.Main) {
+                        onResult(false, "Server returned error: $code")
+                    }
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+                withContext(Dispatchers.Main) {
+                    onResult(false, e.message ?: "Network error occurred")
+                }
             }
         }
     }

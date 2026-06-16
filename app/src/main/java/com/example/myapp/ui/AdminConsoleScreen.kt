@@ -225,6 +225,92 @@ fun AdminConsoleScreen(
                     Text("Publish App Update", fontSize = 16.sp, fontWeight = FontWeight.Bold)
                 }
             }
+
+            Spacer(modifier = Modifier.height(32.dp))
+            HorizontalDivider(color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.2f))
+            Spacer(modifier = Modifier.height(24.dp))
+
+            Text(
+                text = "Delete User Account",
+                fontSize = 22.sp,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.align(Alignment.Start)
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = "Permanently remove a user from the global database, clear their friendship connections, and force-logout their active app instance.",
+                fontSize = 14.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.align(Alignment.Start)
+            )
+            Spacer(modifier = Modifier.height(24.dp))
+
+            var targetUsername by remember { mutableStateOf("") }
+            var isDeleting by remember { mutableStateOf(false) }
+            var showConfirmDialog by remember { mutableStateOf(false) }
+
+            OutlinedTextField(
+                value = targetUsername,
+                onValueChange = { targetUsername = it },
+                label = { Text("Username to Delete") },
+                placeholder = { Text("e.g. johndoe") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
+            )
+            Spacer(modifier = Modifier.height(24.dp))
+
+            if (isDeleting) {
+                CircularProgressIndicator(color = MaterialTheme.colorScheme.error)
+            } else {
+                Button(
+                    onClick = {
+                        if (targetUsername.trim().isEmpty()) {
+                            Toast.makeText(context, "Please enter a username", Toast.LENGTH_SHORT).show()
+                            return@Button
+                        }
+                        showConfirmDialog = true
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text("Delete User Account", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+
+            if (showConfirmDialog) {
+                AlertDialog(
+                    onDismissRequest = { showConfirmDialog = false },
+                    title = { Text("Permanently Delete User?") },
+                    text = { Text("Are you sure you want to delete the user '@${targetUsername.trim()}'? This action is irreversible and will force-logout the user immediately.") },
+                    confirmButton = {
+                        Button(
+                            onClick = {
+                                showConfirmDialog = false
+                                isDeleting = true
+                                viewModel.adminDeleteUser(targetUsername.trim()) { success, err ->
+                                    isDeleting = false
+                                    if (success) {
+                                        Toast.makeText(context, "User '@$targetUsername' deleted successfully!", Toast.LENGTH_SHORT).show()
+                                        targetUsername = ""
+                                    } else {
+                                        Toast.makeText(context, "Deletion failed: $err", Toast.LENGTH_LONG).show()
+                                    }
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                        ) {
+                            Text("Delete Permanently")
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showConfirmDialog = false }) {
+                            Text("Cancel")
+                        }
+                    }
+                )
+            }
         }
     }
 }
