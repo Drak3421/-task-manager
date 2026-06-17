@@ -22,6 +22,8 @@ import com.example.myapp.data.Friend
 import com.example.myapp.data.ChatMessage
 import com.example.myapp.data.FileAttachment
 import com.example.myapp.data.FavoriteWebsite
+import com.example.myapp.data.TaskGroup
+import com.example.myapp.data.GroupTask
 import java.io.IOException
 import kotlinx.coroutines.Job
 import java.net.HttpURLConnection
@@ -40,6 +42,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.firstOrNull
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.io.File
 import android.content.Intent
@@ -72,6 +75,12 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
     val musicPlayerManager = MusicPlayerManager(application)
 
     val tasks = preferencesManager.tasksFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val taskGroups = preferencesManager.taskGroupsFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val groupTasks = preferencesManager.groupTasksFlow
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val welcomeName = preferencesManager.welcomeNameFlow
@@ -406,6 +415,145 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
 
     suspend fun getTaskById(id: Int): Task? {
         return tasks.value.find { it.id == id }
+    }
+
+    // ---------------------------------------------------------------------
+    // Group Tasks (shared collaborative to-do, synced over ntfy.sh)
+    // ---------------------------------------------------------------------
+
+    /** Sends a group event to every member's ntfy topic except my own. */
+    private fun broadcastToGroup(members: List<String>, eventId: String, payloadJson: String) {
+        val me = myUsername.value.lowercase()
+        viewModelScope.launch(Dispatchers.IO) {
+            val msg = ChatMessage(
+                id = eventId,
+                friendUsername = "",
+                sender = myUsername.value,
+                text = payloadJson,
+                timestampMs = System.currentTimeMillis()
+            )
+            members.map { it.lowercase() }.distinct().forEach { member ->
+                if (member.isNotEmpty() && member != me) {
+                    postMessageToNetwork(member, msg)
+                }
+            }
+        }
+    }
+
+    private suspend fun upsertGroupTaskLocal(task: GroupTask) {
+        val current = preferencesManager.groupTasksFlow.firstOrNull()?.toMutableList() ?: mutableListOf()
+        val idx = current.indexOfFirst { it.id == task.id }
+        if (idx != -1) current[idx] = task else current.add(task)
+        preferencesManager.saveGroupTasks(current)
+    }
+
+    fun createTaskGroup(name: String, memberUsernames: List<String>, onResult: (Boolean, String?) -> Unit) {
+        val me = myUsername.value.lowercase()
+        if (me.isEmpty()) {
+            onResult(false, "Set up your account in Friends first")
+            return
+        }
+        val groupName = name.trim()
+        if (groupName.isEmpty()) {
+            onResult(false, "Group name cannot be empty")
+            return
+        }
+        viewModelScope.launch {
+            val members = (memberUsernames.map { it.lowercase() } + me).distinct()
+            val group = TaskGroup(
+                id = java.util.UUID.randomUUID().toString(),
+                name = groupName,
+                members = members,
+                createdBy = me,
+                createdAt = System.currentTimeMillis()
+            )
+            val current = preferencesManager.taskGroupsFlow.firstOrNull()?.toMutableList() ?: mutableListOf()
+            current.add(group)
+            preferencesManager.saveTaskGroups(current)
+            broadcastToGroup(members, "group_sync_${group.id}", Json.encodeToString(group))
+            withContext(Dispatchers.Main) { onResult(true, null) }
+        }
+    }
+
+    fun addMemberToGroup(groupId: String, username: String) {
+        val newMember = username.lowercase()
+        if (newMember.isEmpty()) return
+        viewModelScope.launch {
+            val groups = preferencesManager.taskGroupsFlow.firstOrNull()?.toMutableList() ?: return@launch
+            val idx = groups.indexOfFirst { it.id == groupId }
+            if (idx == -1) return@launch
+            val group = groups[idx]
+            if (group.members.contains(newMember)) return@launch
+            val updated = group.copy(members = (group.members + newMember).distinct())
+            groups[idx] = updated
+            preferencesManager.saveTaskGroups(groups)
+            broadcastToGroup(updated.members, "group_sync_${updated.id}", Json.encodeToString(updated))
+        }
+    }
+
+    fun createGroupTask(groupId: String, title: String, description: String, dueAt: Long, assignedTo: String) {
+        val me = myUsername.value.lowercase()
+        val taskTitle = title.trim()
+        if (me.isEmpty() || taskTitle.isEmpty()) return
+        viewModelScope.launch {
+            val group = preferencesManager.taskGroupsFlow.firstOrNull()?.find { it.id == groupId } ?: return@launch
+            val task = GroupTask(
+                id = java.util.UUID.randomUUID().toString(),
+                groupId = groupId,
+                title = taskTitle,
+                description = description.trim(),
+                dueAt = dueAt,
+                assignedTo = assignedTo.lowercase(),
+                createdBy = me,
+                createdAt = System.currentTimeMillis()
+            )
+            upsertGroupTaskLocal(task)
+            broadcastToGroup(group.members, "grouptask_upsert_${task.id}", Json.encodeToString(task))
+        }
+    }
+
+    fun markGroupTaskDone(groupId: String, taskId: String) {
+        val me = myUsername.value.lowercase()
+        viewModelScope.launch {
+            val current = preferencesManager.groupTasksFlow.firstOrNull()?.toMutableList() ?: return@launch
+            val idx = current.indexOfFirst { it.id == taskId }
+            if (idx == -1) return@launch
+            val done = current[idx].copy(status = "done", doneBy = me, doneAt = System.currentTimeMillis())
+            current[idx] = done
+            preferencesManager.saveGroupTasks(current)
+            val group = preferencesManager.taskGroupsFlow.firstOrNull()?.find { it.id == groupId }
+            if (group != null) {
+                broadcastToGroup(group.members, "grouptask_done_${done.id}", Json.encodeToString(done))
+            }
+        }
+    }
+
+    fun deleteGroupTask(groupId: String, taskId: String) {
+        viewModelScope.launch {
+            val current = preferencesManager.groupTasksFlow.firstOrNull()?.toMutableList() ?: return@launch
+            current.removeIf { it.id == taskId }
+            preferencesManager.saveGroupTasks(current)
+            val group = preferencesManager.taskGroupsFlow.firstOrNull()?.find { it.id == groupId }
+            if (group != null) {
+                broadcastToGroup(group.members, "grouptask_delete_${taskId}", "$groupId|$taskId")
+            }
+        }
+    }
+
+    fun leaveGroup(groupId: String) {
+        val me = myUsername.value.lowercase()
+        viewModelScope.launch {
+            val group = preferencesManager.taskGroupsFlow.firstOrNull()?.find { it.id == groupId }
+            val groups = preferencesManager.taskGroupsFlow.firstOrNull()?.toMutableList() ?: mutableListOf()
+            groups.removeIf { it.id == groupId }
+            preferencesManager.saveTaskGroups(groups)
+            val remaining = preferencesManager.groupTasksFlow.firstOrNull()?.toMutableList() ?: mutableListOf()
+            remaining.removeIf { it.groupId == groupId }
+            preferencesManager.saveGroupTasks(remaining)
+            if (group != null) {
+                broadcastToGroup(group.members, "group_member_left_${groupId}", "$groupId|$me")
+            }
+        }
     }
 
     fun importAudioFile(context: Context, uri: Uri) {
@@ -2082,6 +2230,7 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
             var lastEventTime = preferencesManager.lastEventTimeFlow.firstOrNull() ?: 0L
             while (isActive) {
                 var connection: HttpURLConnection? = null
+                var reader: java.io.BufferedReader? = null
                 try {
                     val sinceParam = if (lastEventTime > 0L) {
                         "?since=$lastEventTime"
@@ -2098,11 +2247,11 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
                     
                     if (connection.responseCode == HttpURLConnection.HTTP_OK) {
                         backoffMs = 2000L
-                        val reader = connection.inputStream.bufferedReader()
+                        reader = connection.inputStream.bufferedReader()
                         while (isActive) {
                             val line = reader.readLine() ?: break
                             if (line.trim().isEmpty()) continue
-                            
+
                             try {
                                 val jsonObj = org.json.JSONObject(line)
                                 val event = jsonObj.optString("event")
@@ -2117,9 +2266,7 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
                                     val chatMsg = Json.decodeFromString<ChatMessage>(rawMessageText)
                                     if (chatMsg.id.startsWith("typing_")) {
                                         val sender = chatMsg.sender.lowercase()
-                                        val current = typingFriends.value.toMutableMap()
-                                        current[sender] = System.currentTimeMillis()
-                                        typingFriends.value = current
+                                        typingFriends.update { it + (sender to System.currentTimeMillis()) }
                                     } else if (chatMsg.id.startsWith("delivered_")) {
                                         val originalId = chatMsg.id.removePrefix("delivered_")
                                         updateMessageStatus(originalId, "delivered")
@@ -2176,6 +2323,77 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
                                             preferencesManager.saveIncomingRequests(emptyList())
                                             preferencesManager.saveSentRequests(emptyList())
                                         }
+                                    } else if (chatMsg.id.startsWith("group_sync_")) {
+                                        try {
+                                            val group = Json.decodeFromString<TaskGroup>(chatMsg.text)
+                                            val me = myUsername.value.lowercase()
+                                            if (group.members.contains(me)) {
+                                                withContext(Dispatchers.Main) {
+                                                    val groups = preferencesManager.taskGroupsFlow.firstOrNull()?.toMutableList() ?: mutableListOf()
+                                                    val idx = groups.indexOfFirst { it.id == group.id }
+                                                    val isNew = idx == -1
+                                                    if (isNew) groups.add(group) else groups[idx] = group
+                                                    preferencesManager.saveTaskGroups(groups)
+                                                    if (isNew) showFriendNotification("Group Task", "You were added to group '${group.name}'")
+                                                }
+                                            }
+                                        } catch (e: Exception) { e.printStackTrace() }
+                                    } else if (chatMsg.id.startsWith("grouptask_upsert_")) {
+                                        try {
+                                            val task = Json.decodeFromString<GroupTask>(chatMsg.text)
+                                            val me = myUsername.value.lowercase()
+                                            val inGroup = preferencesManager.taskGroupsFlow.firstOrNull()
+                                                ?.any { it.id == task.groupId && it.members.contains(me) } == true
+                                            if (inGroup) {
+                                                withContext(Dispatchers.Main) {
+                                                    val current = preferencesManager.groupTasksFlow.firstOrNull()?.toMutableList() ?: mutableListOf()
+                                                    val idx = current.indexOfFirst { it.id == task.id }
+                                                    if (idx != -1) current[idx] = task else current.add(task)
+                                                    preferencesManager.saveGroupTasks(current)
+                                                }
+                                            }
+                                        } catch (e: Exception) { e.printStackTrace() }
+                                    } else if (chatMsg.id.startsWith("grouptask_done_")) {
+                                        try {
+                                            val task = Json.decodeFromString<GroupTask>(chatMsg.text)
+                                            withContext(Dispatchers.Main) {
+                                                val current = preferencesManager.groupTasksFlow.firstOrNull()?.toMutableList() ?: mutableListOf()
+                                                val idx = current.indexOfFirst { it.id == task.id }
+                                                if (idx != -1) {
+                                                    current[idx] = task
+                                                    preferencesManager.saveGroupTasks(current)
+                                                    showFriendNotification("Task Completed", "${task.doneBy} finished '${task.title}'")
+                                                }
+                                            }
+                                        } catch (e: Exception) { e.printStackTrace() }
+                                    } else if (chatMsg.id.startsWith("grouptask_delete_")) {
+                                        try {
+                                            val taskId = chatMsg.text.split("|").getOrNull(1) ?: ""
+                                            if (taskId.isNotEmpty()) {
+                                                withContext(Dispatchers.Main) {
+                                                    val current = preferencesManager.groupTasksFlow.firstOrNull()?.toMutableList() ?: mutableListOf()
+                                                    current.removeIf { it.id == taskId }
+                                                    preferencesManager.saveGroupTasks(current)
+                                                }
+                                            }
+                                        } catch (e: Exception) { e.printStackTrace() }
+                                    } else if (chatMsg.id.startsWith("group_member_left_")) {
+                                        try {
+                                            val parts = chatMsg.text.split("|")
+                                            val groupId = parts.getOrNull(0) ?: ""
+                                            val leaver = parts.getOrNull(1)?.lowercase() ?: ""
+                                            if (groupId.isNotEmpty() && leaver.isNotEmpty()) {
+                                                withContext(Dispatchers.Main) {
+                                                    val groups = preferencesManager.taskGroupsFlow.firstOrNull()?.toMutableList() ?: mutableListOf()
+                                                    val idx = groups.indexOfFirst { it.id == groupId }
+                                                    if (idx != -1) {
+                                                        val g = groups[idx]
+                                                        groups[idx] = g.copy(members = g.members.filter { it != leaver })
+                                                        preferencesManager.saveTaskGroups(groups)
+                                                    }
+                                                }
+                                            }
+                                        } catch (e: Exception) { e.printStackTrace() }
                                     } else {
                                         handleIncomingMessage(chatMsg)
                                     }
@@ -2188,6 +2406,7 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
                 } catch (e: Exception) {
                     e.printStackTrace()
                 } finally {
+                    try { reader?.close() } catch (_: Exception) {}
                     connection?.disconnect()
                 }
                 delay(backoffMs)
@@ -2404,10 +2623,10 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
                     if (!dir.exists()) dir.mkdirs()
                     
                     val file = File(dir, "${myName.lowercase()}.jpg")
-                    val outStream = FileOutputStream(file)
-                    scaledBitmap.compress(Bitmap.CompressFormat.JPEG, 80, outStream)
-                    outStream.flush()
-                    outStream.close()
+                    FileOutputStream(file).use { outStream ->
+                        scaledBitmap.compress(Bitmap.CompressFormat.JPEG, 80, outStream)
+                        outStream.flush()
+                    }
                     
                     // Read file bytes for base64 encoding
                     val bytes = file.readBytes()
@@ -2804,6 +3023,7 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
             var backoffMs = 2000L
             while (isActive) {
                 var connection: HttpURLConnection? = null
+                var reader: java.io.BufferedReader? = null
                 try {
                     val url = URL("https://ntfy.sh/$ntfyTopic/json")
                     connection = (url.openConnection() as HttpURLConnection).apply {
@@ -2812,14 +3032,14 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
                         requestMethod = "GET"
                     }
                     connection.connect()
-                    
+
                     if (connection.responseCode == HttpURLConnection.HTTP_OK) {
                         backoffMs = 2000L
-                        val reader = connection.inputStream.bufferedReader()
+                        reader = connection.inputStream.bufferedReader()
                         while (isActive) {
                             val line = reader.readLine() ?: break
                             if (line.trim().isEmpty()) continue
-                            
+
                             try {
                                 val jsonObj = org.json.JSONObject(line)
                                 val event = jsonObj.optString("event")
@@ -2834,6 +3054,7 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
                 } catch (e: Exception) {
                     e.printStackTrace()
                 } finally {
+                    try { reader?.close() } catch (_: Exception) {}
                     connection?.disconnect()
                 }
                 delay(backoffMs)

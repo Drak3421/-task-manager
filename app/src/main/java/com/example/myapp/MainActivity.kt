@@ -35,6 +35,8 @@ import com.example.myapp.ui.ChatScreen
 import com.example.myapp.ui.BrowserScreen
 import com.example.myapp.ui.AdminConsoleScreen
 import com.example.myapp.ui.MusicLibraryScreen
+import com.example.myapp.ui.GroupTasksScreen
+import com.example.myapp.ui.GroupDetailScreen
 import com.example.myapp.ui.theme.MyAppTheme
 import androidx.compose.ui.graphics.Color
 import androidx.compose.runtime.remember
@@ -112,7 +114,27 @@ fun AppNavigation(viewModel: TaskViewModel) {
                 },
                 onNavigateToMusicLibrary = {
                     navController.navigate("musicLibrary")
+                },
+                onNavigateToGroupTasks = {
+                    navController.navigate("groupTasks")
                 }
+            )
+        }
+        composable(route = "groupTasks") {
+            GroupTasksScreen(
+                viewModel = viewModel,
+                onNavigateToDetail = { groupId ->
+                    navController.navigate("groupTaskDetail/$groupId")
+                },
+                onNavigateBack = { navController.popBackStack() }
+            )
+        }
+        composable(route = "groupTaskDetail/{groupId}") { backStackEntry ->
+            val groupId = backStackEntry.arguments?.getString("groupId") ?: ""
+            GroupDetailScreen(
+                viewModel = viewModel,
+                groupId = groupId,
+                onNavigateBack = { navController.popBackStack() }
             )
         }
         composable(route = "musicLibrary") {

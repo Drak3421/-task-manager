@@ -19,6 +19,7 @@ import androidx.compose.material.icons.rounded.Subscriptions
 import androidx.compose.material.icons.rounded.Newspaper
 import androidx.compose.material.icons.rounded.Language
 import androidx.compose.material.icons.rounded.People
+import androidx.compose.material.icons.rounded.Groups
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.ArrowForwardIos
 import androidx.compose.material.icons.rounded.MusicNote
@@ -54,7 +55,8 @@ fun HomeScreen(
     onNavigateToNewsUpdates: () -> Unit,
     onNavigateToBrowser: () -> Unit,
     onNavigateToFriends: () -> Unit,
-    onNavigateToMusicLibrary: () -> Unit
+    onNavigateToMusicLibrary: () -> Unit,
+    onNavigateToGroupTasks: () -> Unit
 ) {
     val tasks by viewModel.tasks.collectAsState()
     val welcomeName by viewModel.welcomeName.collectAsState()
@@ -92,6 +94,9 @@ fun HomeScreen(
                     colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
                     title = { Text("") },
                     actions = {
+                        IconButton(onClick = onNavigateToGroupTasks) {
+                            Icon(Icons.Rounded.Groups, contentDescription = "Group Tasks")
+                        }
                         IconButton(onClick = onNavigateToFriends) {
                             Icon(Icons.Rounded.People, contentDescription = "Friends")
                         }

@@ -43,6 +43,8 @@ class PreferencesManager(private val context: Context) {
         val SENT_REQUESTS_KEY = stringPreferencesKey("sent_requests_json")
         val LAST_EVENT_TIME_KEY = longPreferencesKey("last_event_time")
         val ACTIVE_APP_ICON_KEY = stringPreferencesKey("active_app_icon")
+        val TASK_GROUPS_KEY = stringPreferencesKey("task_groups_json")
+        val GROUP_TASKS_KEY = stringPreferencesKey("group_tasks_json")
     }
 
     val tasksFlow: Flow<List<Task>> = context.dataStore.data
@@ -390,6 +392,46 @@ class PreferencesManager(private val context: Context) {
     suspend fun saveLastEventTime(time: Long) {
         context.dataStore.edit { preferences ->
             preferences[LAST_EVENT_TIME_KEY] = time
+        }
+    }
+
+    val taskGroupsFlow: Flow<List<TaskGroup>> = context.dataStore.data
+        .catch { exception ->
+            if (exception is IOException) emit(emptyPreferences())
+            else throw exception
+        }
+        .map { preferences ->
+            val json = preferences[TASK_GROUPS_KEY] ?: "[]"
+            try {
+                Json.decodeFromString(json)
+            } catch (e: Exception) {
+                emptyList()
+            }
+        }
+
+    suspend fun saveTaskGroups(groups: List<TaskGroup>) {
+        context.dataStore.edit { preferences ->
+            preferences[TASK_GROUPS_KEY] = Json.encodeToString(groups)
+        }
+    }
+
+    val groupTasksFlow: Flow<List<GroupTask>> = context.dataStore.data
+        .catch { exception ->
+            if (exception is IOException) emit(emptyPreferences())
+            else throw exception
+        }
+        .map { preferences ->
+            val json = preferences[GROUP_TASKS_KEY] ?: "[]"
+            try {
+                Json.decodeFromString(json)
+            } catch (e: Exception) {
+                emptyList()
+            }
+        }
+
+    suspend fun saveGroupTasks(tasks: List<GroupTask>) {
+        context.dataStore.edit { preferences ->
+            preferences[GROUP_TASKS_KEY] = Json.encodeToString(tasks)
         }
     }
 
