@@ -20,6 +20,8 @@ import androidx.compose.material.icons.rounded.Newspaper
 import androidx.compose.material.icons.rounded.Language
 import androidx.compose.material.icons.rounded.People
 import androidx.compose.material.icons.rounded.Groups
+import androidx.compose.material.icons.rounded.Alarm
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.ArrowForwardIos
 import androidx.compose.material.icons.rounded.MusicNote
@@ -94,24 +96,6 @@ fun HomeScreen(
                     colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
                     title = { Text("") },
                     actions = {
-                        IconButton(onClick = onNavigateToGroupTasks) {
-                            Icon(Icons.Rounded.Groups, contentDescription = "Group Tasks")
-                        }
-                        IconButton(onClick = onNavigateToFriends) {
-                            Icon(Icons.Rounded.People, contentDescription = "Friends")
-                        }
-                        IconButton(onClick = onNavigateToYoutubeUpdates) {
-                            Icon(Icons.Rounded.Subscriptions, contentDescription = "YouTube Updates")
-                        }
-                        IconButton(onClick = onNavigateToNewsUpdates) {
-                            Icon(Icons.Rounded.Newspaper, contentDescription = "News Updates")
-                        }
-                        IconButton(onClick = onNavigateToBrowser) {
-                            Icon(Icons.Rounded.Language, contentDescription = "Web Browser")
-                        }
-                        IconButton(onClick = onNavigateToMusicLibrary) {
-                            Icon(Icons.Rounded.MusicNote, contentDescription = "Music Library")
-                        }
                         IconButton(onClick = onNavigateToSettings) {
                             Icon(Icons.Default.Settings, contentDescription = "Settings")
                         }
@@ -127,11 +111,11 @@ fun HomeScreen(
             ) {
                 // Clock Layout Selection
                 val clockLayout by viewModel.clockLayout.collectAsState()
-                
+
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(140.dp),
+                        .height(120.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     when (clockLayout) {
@@ -217,34 +201,112 @@ fun HomeScreen(
                     }
                 }
 
-                // Welcome Message
+                // Date line under the clock
+                val dateFormat = remember { SimpleDateFormat("EEEE, MMMM d", Locale.getDefault()) }
                 Text(
-                    text = "Welcome, $welcomeName",
-                    fontSize = 24.sp,
+                    text = dateFormat.format(currentTime),
+                    fontSize = 15.sp,
                     fontWeight = FontWeight.Medium,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(bottom = 24.dp, top = 8.dp)
-                )
-
-                Text(
-                    text = "ALARMS",
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(bottom = 8.dp)
+                    modifier = Modifier
+                        .align(Alignment.CenterHorizontally)
+                        .padding(top = 2.dp)
                 )
 
-                LazyColumn(
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                    contentPadding = PaddingValues(bottom = 90.dp), // allow scrolling past mini player
-                    modifier = Modifier.fillMaxSize()
+                // Time-aware greeting
+                Text(
+                    text = "${greetingForHour(Calendar.getInstance().get(Calendar.HOUR_OF_DAY))}, $welcomeName",
+                    fontSize = 24.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onBackground,
+                    modifier = Modifier.padding(top = 20.dp, bottom = 16.dp)
+                )
+
+                // Quick-access shortcut tiles
+                val shortcuts = listOf(
+                    ShortcutItem("Friends", Icons.Rounded.People, onNavigateToFriends),
+                    ShortcutItem("Groups", Icons.Rounded.Groups, onNavigateToGroupTasks),
+                    ShortcutItem("YouTube", Icons.Rounded.Subscriptions, onNavigateToYoutubeUpdates),
+                    ShortcutItem("News", Icons.Rounded.Newspaper, onNavigateToNewsUpdates),
+                    ShortcutItem("Browser", Icons.Rounded.Language, onNavigateToBrowser),
+                    ShortcutItem("Music", Icons.Rounded.MusicNote, onNavigateToMusicLibrary)
+                )
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    shortcuts.chunked(3).forEach { rowItems ->
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            rowItems.forEach { item ->
+                                ShortcutTile(item = item, modifier = Modifier.weight(1f))
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(24.dp))
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    items(tasks, key = { it.id }) { task ->
-                        TaskCard(
-                            task = task,
-                            onClick = { onNavigateToTask(task.id) },
-                            onDelete = { viewModel.deleteTask(task) }
+                    Text(
+                        text = "ALARMS",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    if (tasks.isNotEmpty()) {
+                        Text(
+                            text = "${tasks.size}",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
+                    }
+                }
+
+                if (tasks.isEmpty()) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 32.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Icon(
+                            Icons.Rounded.Alarm,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                            modifier = Modifier.size(48.dp)
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text(
+                            text = "No alarms yet",
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "Tap + to set your first alarm",
+                            fontSize = 13.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                } else {
+                    LazyColumn(
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                        contentPadding = PaddingValues(bottom = 90.dp), // allow scrolling past mini player
+                        modifier = Modifier.fillMaxSize()
+                    ) {
+                        items(tasks, key = { it.id }) { task ->
+                            TaskCard(
+                                task = task,
+                                onClick = { onNavigateToTask(task.id) },
+                                onDelete = { viewModel.deleteTask(task) }
+                            )
+                        }
                     }
                 }
             }
@@ -381,7 +443,7 @@ fun TaskCard(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column {
+                    Column(modifier = Modifier.weight(1f)) {
                         val dateFormat = SimpleDateFormat("MMM dd, yyyy", Locale.getDefault())
                         val timeFormat = SimpleDateFormat("hh:mm a", Locale.getDefault())
                         val date = Date(task.timestampMs)
@@ -399,8 +461,68 @@ fun TaskCard(
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(androidx.compose.foundation.shape.CircleShape)
+                            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.Rounded.Alarm,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
                 }
             }
+        }
+    }
+}
+
+private fun greetingForHour(hour: Int): String = when (hour) {
+    in 5..11 -> "Good morning"
+    in 12..16 -> "Good afternoon"
+    in 17..20 -> "Good evening"
+    else -> "Good night"
+}
+
+data class ShortcutItem(
+    val label: String,
+    val icon: ImageVector,
+    val onClick: () -> Unit
+)
+
+@Composable
+fun ShortcutTile(item: ShortcutItem, modifier: Modifier = Modifier) {
+    Card(
+        modifier = modifier
+            .clip(RoundedCornerShape(16.dp))
+            .clickable { item.onClick() },
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Icon(
+                imageVector = item.icon,
+                contentDescription = item.label,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(26.dp)
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                text = item.label,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium,
+                color = MaterialTheme.colorScheme.onSurface
+            )
         }
     }
 }
