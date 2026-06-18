@@ -45,6 +45,11 @@ class PreferencesManager(private val context: Context) {
         val ACTIVE_APP_ICON_KEY = stringPreferencesKey("active_app_icon")
         val TASK_GROUPS_KEY = stringPreferencesKey("task_groups_json")
         val GROUP_TASKS_KEY = stringPreferencesKey("group_tasks_json")
+        val PLAYER_FLOAT_ENABLED_KEY = booleanPreferencesKey("player_float_enabled")
+        val PLAYER_FLOAT_X_KEY = androidx.datastore.preferences.core.floatPreferencesKey("player_float_x")
+        val PLAYER_FLOAT_Y_KEY = androidx.datastore.preferences.core.floatPreferencesKey("player_float_y")
+        val SUBSCRIBED_USERS_KEY = stringPreferencesKey("subscribed_users_json")
+        val SHARED_TASKS_KEY = stringPreferencesKey("shared_tasks_json")
     }
 
     val tasksFlow: Flow<List<Task>> = context.dataStore.data
@@ -433,6 +438,51 @@ class PreferencesManager(private val context: Context) {
         context.dataStore.edit { preferences ->
             preferences[GROUP_TASKS_KEY] = Json.encodeToString(tasks)
         }
+    }
+
+    val playerFloatEnabledFlow: Flow<Boolean> = context.dataStore.data.map { prefs ->
+        prefs[PLAYER_FLOAT_ENABLED_KEY] ?: false
+    }
+
+    suspend fun setPlayerFloatEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[PLAYER_FLOAT_ENABLED_KEY] = enabled }
+    }
+
+    val playerFloatXFlow: Flow<Float> = context.dataStore.data.map { prefs ->
+        prefs[PLAYER_FLOAT_X_KEY] ?: 0f
+    }
+
+    val playerFloatYFlow: Flow<Float> = context.dataStore.data.map { prefs ->
+        prefs[PLAYER_FLOAT_Y_KEY] ?: 0f
+    }
+
+    suspend fun setPlayerFloatPosition(x: Float, y: Float) {
+        context.dataStore.edit {
+            it[PLAYER_FLOAT_X_KEY] = x
+            it[PLAYER_FLOAT_Y_KEY] = y
+        }
+    }
+
+    val subscribedUsersFlow: Flow<List<String>> = context.dataStore.data
+        .catch { e -> if (e is IOException) emit(emptyPreferences()) else throw e }
+        .map { prefs ->
+            val json = prefs[SUBSCRIBED_USERS_KEY] ?: "[]"
+            try { Json.decodeFromString<List<String>>(json) } catch (_: Exception) { emptyList() }
+        }
+
+    suspend fun saveSubscribedUsers(users: List<String>) {
+        context.dataStore.edit { it[SUBSCRIBED_USERS_KEY] = Json.encodeToString(users) }
+    }
+
+    val sharedTasksFlow: Flow<List<SharedTask>> = context.dataStore.data
+        .catch { e -> if (e is IOException) emit(emptyPreferences()) else throw e }
+        .map { prefs ->
+            val json = prefs[SHARED_TASKS_KEY] ?: "[]"
+            try { Json.decodeFromString<List<SharedTask>>(json) } catch (_: Exception) { emptyList() }
+        }
+
+    suspend fun saveSharedTasks(tasks: List<SharedTask>) {
+        context.dataStore.edit { it[SHARED_TASKS_KEY] = Json.encodeToString(tasks) }
     }
 
     val activeAppIconFlow: Flow<String> = context.dataStore.data

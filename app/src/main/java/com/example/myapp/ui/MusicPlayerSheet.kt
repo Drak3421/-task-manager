@@ -8,7 +8,13 @@ import androidx.compose.animation.*
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.IntOffset
+import kotlin.math.roundToInt
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -45,6 +51,20 @@ fun MusicPlayerSheet(
     val isRepeatEnabled by viewModel.isRepeatEnabled.collectAsState()
 
     var isExpanded by remember { mutableStateOf(false) }
+    val floatEnabled by viewModel.playerFloatEnabled.collectAsState()
+    val savedFloatX by viewModel.playerFloatX.collectAsState()
+    val savedFloatY by viewModel.playerFloatY.collectAsState()
+    var floatX by remember { mutableStateOf(0f) }
+    var floatY by remember { mutableStateOf(0f) }
+    var floatInitialized by remember { mutableStateOf(false) }
+    LaunchedEffect(savedFloatX, savedFloatY, floatEnabled) {
+        if (floatEnabled && !floatInitialized) {
+            floatX = savedFloatX
+            floatY = savedFloatY
+            floatInitialized = true
+        }
+        if (!floatEnabled) floatInitialized = false
+    }
 
     val requiredPermission = if (android.os.Build.VERSION.SDK_INT >= 33) {
         android.Manifest.permission.READ_MEDIA_AUDIO
@@ -89,22 +109,55 @@ fun MusicPlayerSheet(
     }
 
     Box(
-        modifier = modifier
-            .fillMaxWidth()
-            .wrapContentHeight()
-            .navigationBarsPadding()
+        modifier = if (floatEnabled && !isExpanded) {
+            modifier.fillMaxSize()
+        } else {
+            modifier
+                .fillMaxWidth()
+                .wrapContentHeight()
+                .navigationBarsPadding()
+        }
     ) {
         // Collapsed Mini Player
         AnimatedVisibility(
             visible = !isExpanded,
             enter = fadeIn() + expandVertically(),
-            exit = fadeOut() + shrinkVertically()
+            exit = fadeOut() + shrinkVertically(),
+            modifier = if (floatEnabled) {
+                Modifier
+                    .offset { IntOffset(floatX.roundToInt(), floatY.roundToInt()) }
+                    .wrapContentSize()
+            } else Modifier
         ) {
             Card(
-                modifier = Modifier
-                    .fillMaxWidth()
+                modifier = (if (floatEnabled) Modifier.width(320.dp) else Modifier.fillMaxWidth())
                     .padding(horizontal = 16.dp, vertical = 8.dp)
-                    .clickable { isExpanded = true },
+                    .pointerInput(floatEnabled) {
+                        detectTapGestures(
+                            onLongPress = {
+                                val newEnabled = !floatEnabled
+                                viewModel.setPlayerFloatEnabled(newEnabled)
+                                if (newEnabled) {
+                                    // Initial position: just above current docked location.
+                                    viewModel.setPlayerFloatPosition(floatX, floatY)
+                                }
+                            },
+                            onTap = { isExpanded = true }
+                        )
+                    }
+                    .pointerInput(floatEnabled) {
+                        if (floatEnabled) {
+                            detectDragGestures(
+                                onDragEnd = {
+                                    viewModel.setPlayerFloatPosition(floatX, floatY)
+                                }
+                            ) { change, drag ->
+                                change.consume()
+                                floatX += drag.x
+                                floatY += drag.y
+                            }
+                        }
+                    },
                 shape = RoundedCornerShape(16.dp),
                 colors = CardDefaults.cardColors(
                     containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.9f)

@@ -43,6 +43,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.myapp.data.Task
+import com.example.myapp.data.SharedTask
 import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
 import java.util.*
@@ -61,6 +62,7 @@ fun HomeScreen(
     onNavigateToGroupTasks: () -> Unit
 ) {
     val tasks by viewModel.tasks.collectAsState()
+    val sharedTasks by viewModel.sharedTasks.collectAsState()
     val welcomeName by viewModel.welcomeName.collectAsState()
     val isUpdateAvailable by viewModel.isUpdateAvailable.collectAsState()
     val updateDownloadUrl by viewModel.updateDownloadUrl.collectAsState()
@@ -96,7 +98,13 @@ fun HomeScreen(
                     colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
                     title = { Text("") },
                     actions = {
-                        IconButton(onClick = onNavigateToSettings) {
+                        IconButton(
+                            onClick = onNavigateToSettings,
+                            colors = IconButtonDefaults.iconButtonColors(
+                                containerColor = MaterialTheme.colorScheme.surface,
+                                contentColor = MaterialTheme.colorScheme.onSurface
+                            )
+                        ) {
                             Icon(Icons.Default.Settings, contentDescription = "Settings")
                         }
                     }
@@ -224,12 +232,16 @@ fun HomeScreen(
 
                 // Quick-access shortcut tiles
                 val shortcuts = listOf(
-                    ShortcutItem("Friends", Icons.Rounded.People, onNavigateToFriends),
-                    ShortcutItem("Groups", Icons.Rounded.Groups, onNavigateToGroupTasks),
-                    ShortcutItem("YouTube", Icons.Rounded.Subscriptions, onNavigateToYoutubeUpdates),
-                    ShortcutItem("News", Icons.Rounded.Newspaper, onNavigateToNewsUpdates),
-                    ShortcutItem("Browser", Icons.Rounded.Language, onNavigateToBrowser),
-                    ShortcutItem("Music", Icons.Rounded.MusicNote, onNavigateToMusicLibrary)
+                    ShortcutItem("Friends", Icons.Rounded.People,
+                        listOf(Color(0xFF0A84FF), Color(0xFF5AC8FA)), onNavigateToFriends),
+                    ShortcutItem("YouTube", Icons.Rounded.Subscriptions,
+                        listOf(Color(0xFFFF3B30), Color(0xFFFF6961)), onNavigateToYoutubeUpdates),
+                    ShortcutItem("News", Icons.Rounded.Newspaper,
+                        listOf(Color(0xFF5856D6), Color(0xFFAF52DE)), onNavigateToNewsUpdates),
+                    ShortcutItem("Browser", Icons.Rounded.Language,
+                        listOf(Color(0xFF34C759), Color(0xFF30D158)), onNavigateToBrowser),
+                    ShortcutItem("Music", Icons.Rounded.MusicNote,
+                        listOf(Color(0xFFFF2D55), Color(0xFFFF375F)), onNavigateToMusicLibrary)
                 )
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     shortcuts.chunked(3).forEach { rowItems ->
@@ -257,9 +269,10 @@ fun HomeScreen(
                         letterSpacing = 1.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    if (tasks.isNotEmpty()) {
+                    val totalCount = tasks.size + sharedTasks.size
+                    if (totalCount > 0) {
                         Text(
-                            text = "${tasks.size}",
+                            text = "$totalCount",
                             fontSize = 13.sp,
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -267,7 +280,7 @@ fun HomeScreen(
                     }
                 }
 
-                if (tasks.isEmpty()) {
+                if (tasks.isEmpty() && sharedTasks.isEmpty()) {
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -300,12 +313,15 @@ fun HomeScreen(
                         contentPadding = PaddingValues(bottom = 90.dp), // allow scrolling past mini player
                         modifier = Modifier.fillMaxSize()
                     ) {
-                        items(tasks, key = { it.id }) { task ->
+                        items(tasks, key = { "own_${it.id}" }) { task ->
                             TaskCard(
                                 task = task,
                                 onClick = { onNavigateToTask(task.id) },
                                 onDelete = { viewModel.deleteTask(task) }
                             )
+                        }
+                        items(sharedTasks, key = { "shared_${it.ownerUsername}_${it.taskId}" }) { shared ->
+                            SharedTaskCard(shared = shared)
                         }
                     }
                 }
@@ -463,16 +479,20 @@ fun TaskCard(
                     }
                     Box(
                         modifier = Modifier
-                            .size(40.dp)
-                            .clip(androidx.compose.foundation.shape.CircleShape)
-                            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)),
+                            .size(44.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(
+                                androidx.compose.ui.graphics.Brush.linearGradient(
+                                    listOf(Color(0xFFFF9500), Color(0xFFFF6A00))
+                                )
+                            ),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
                             Icons.Rounded.Alarm,
                             contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(22.dp)
+                            tint = Color.White,
+                            modifier = Modifier.size(24.dp)
                         )
                     }
                 }
@@ -491,38 +511,111 @@ private fun greetingForHour(hour: Int): String = when (hour) {
 data class ShortcutItem(
     val label: String,
     val icon: ImageVector,
+    val gradient: List<Color>,
     val onClick: () -> Unit
 )
 
 @Composable
-fun ShortcutTile(item: ShortcutItem, modifier: Modifier = Modifier) {
+fun SharedTaskCard(shared: SharedTask) {
     Card(
-        modifier = modifier
-            .clip(RoundedCornerShape(16.dp))
-            .clickable { item.onClick() },
+        modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface
+        )
     ) {
-        Column(
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(vertical = 16.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
+                .padding(16.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                val dateFormat = SimpleDateFormat("MMM dd, yyyy", Locale.getDefault())
+                val timeFormat = SimpleDateFormat("hh:mm a", Locale.getDefault())
+                val date = Date(shared.timestampMs)
+
+                Text(
+                    text = timeFormat.format(date),
+                    fontSize = 32.sp,
+                    fontWeight = FontWeight.Light,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "${shared.title} • ${dateFormat.format(date)}",
+                    fontSize = 14.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Surface(
+                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+                    shape = RoundedCornerShape(6.dp)
+                ) {
+                    Text(
+                        text = "from ${shared.ownerUsername}",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                    )
+                }
+            }
+            Box(
+                modifier = Modifier
+                    .size(44.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(
+                        androidx.compose.ui.graphics.Brush.linearGradient(
+                            listOf(Color(0xFF0A84FF), Color(0xFF5AC8FA))
+                        )
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    Icons.Rounded.People,
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun ShortcutTile(item: ShortcutItem, modifier: Modifier = Modifier) {
+    Column(
+        modifier = modifier
+            .clip(RoundedCornerShape(20.dp))
+            .clickable { item.onClick() }
+            .padding(vertical = 8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Box(
+            modifier = Modifier
+                .size(56.dp)
+                .clip(RoundedCornerShape(16.dp))
+                .background(
+                    androidx.compose.ui.graphics.Brush.linearGradient(item.gradient)
+                ),
+            contentAlignment = Alignment.Center
         ) {
             Icon(
                 imageVector = item.icon,
                 contentDescription = item.label,
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(26.dp)
-            )
-            Spacer(modifier = Modifier.height(6.dp))
-            Text(
-                text = item.label,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Medium,
-                color = MaterialTheme.colorScheme.onSurface
+                tint = Color.White,
+                modifier = Modifier.size(28.dp)
             )
         }
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = item.label,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Medium,
+            color = MaterialTheme.colorScheme.onBackground
+        )
     }
 }

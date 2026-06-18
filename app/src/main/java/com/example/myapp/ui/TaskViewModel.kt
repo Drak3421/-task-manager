@@ -24,6 +24,7 @@ import com.example.myapp.data.FileAttachment
 import com.example.myapp.data.FavoriteWebsite
 import com.example.myapp.data.TaskGroup
 import com.example.myapp.data.GroupTask
+import com.example.myapp.data.SharedTask
 import java.io.IOException
 import kotlinx.coroutines.Job
 import java.net.HttpURLConnection
@@ -81,6 +82,29 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val groupTasks = preferencesManager.groupTasksFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val playerFloatEnabled = preferencesManager.playerFloatEnabledFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+
+    val playerFloatX = preferencesManager.playerFloatXFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0f)
+
+    val playerFloatY = preferencesManager.playerFloatYFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0f)
+
+    fun setPlayerFloatEnabled(enabled: Boolean) {
+        viewModelScope.launch { preferencesManager.setPlayerFloatEnabled(enabled) }
+    }
+
+    fun setPlayerFloatPosition(x: Float, y: Float) {
+        viewModelScope.launch { preferencesManager.setPlayerFloatPosition(x, y) }
+    }
+
+    val subscribedUsers = preferencesManager.subscribedUsersFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val sharedTasks = preferencesManager.sharedTasksFlow
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val welcomeName = preferencesManager.welcomeNameFlow
@@ -400,6 +424,7 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
             }
             preferencesManager.saveTasks(currentTasks)
             alarmScheduler.scheduleTaskAlarm(savedTask)
+            broadcastSharedTaskUpsert(savedTask)
             onComplete()
         }
     }
@@ -410,6 +435,85 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
             currentTasks.removeIf { it.id == task.id }
             preferencesManager.saveTasks(currentTasks)
             alarmScheduler.cancelTaskAlarm(task.id)
+            broadcastSharedTaskDelete(task.id)
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // Read-only task sharing — subscribers see my alarms in their home list.
+    // ---------------------------------------------------------------------
+
+    private fun broadcastSharedTaskUpsert(task: Task) {
+        val me = myUsername.value.lowercase()
+        if (me.isEmpty()) return
+        viewModelScope.launch(Dispatchers.IO) {
+            val friendsList = preferencesManager.friendsFlow.firstOrNull() ?: return@launch
+            if (friendsList.isEmpty()) return@launch
+            val shared = SharedTask(
+                ownerUsername = me,
+                taskId = task.id,
+                title = task.title,
+                description = task.description,
+                timestampMs = task.timestampMs
+            )
+            val payload = Json.encodeToString(shared)
+            val msg = ChatMessage(
+                id = "shared_task_upsert_${me}_${task.id}",
+                friendUsername = "",
+                sender = myUsername.value,
+                text = payload,
+                timestampMs = System.currentTimeMillis()
+            )
+            friendsList.forEach { friend ->
+                postMessageToNetwork(friend.username.lowercase(), msg)
+            }
+        }
+    }
+
+    private fun broadcastSharedTaskDelete(taskId: Int) {
+        val me = myUsername.value.lowercase()
+        if (me.isEmpty()) return
+        viewModelScope.launch(Dispatchers.IO) {
+            val friendsList = preferencesManager.friendsFlow.firstOrNull() ?: return@launch
+            if (friendsList.isEmpty()) return@launch
+            val msg = ChatMessage(
+                id = "shared_task_delete_${me}_${taskId}",
+                friendUsername = "",
+                sender = myUsername.value,
+                text = "${me}|${taskId}",
+                timestampMs = System.currentTimeMillis()
+            )
+            friendsList.forEach { friend ->
+                postMessageToNetwork(friend.username.lowercase(), msg)
+            }
+        }
+    }
+
+    fun subscribeToUser(username: String, onResult: (Boolean, String?) -> Unit) {
+        val u = username.trim().lowercase()
+        if (u.isEmpty()) { onResult(false, "Username cannot be empty"); return }
+        if (u == myUsername.value.lowercase()) { onResult(false, "Cannot subscribe to yourself"); return }
+        viewModelScope.launch {
+            val current = preferencesManager.subscribedUsersFlow.firstOrNull()?.toMutableList() ?: mutableListOf()
+            if (current.any { it.equals(u, ignoreCase = true) }) {
+                onResult(false, "Already added"); return@launch
+            }
+            current.add(u)
+            preferencesManager.saveSubscribedUsers(current)
+            withContext(Dispatchers.Main) { onResult(true, null) }
+        }
+    }
+
+    fun unsubscribeFromUser(username: String) {
+        val u = username.lowercase()
+        viewModelScope.launch {
+            val current = preferencesManager.subscribedUsersFlow.firstOrNull()?.toMutableList() ?: return@launch
+            current.removeIf { it.equals(u, ignoreCase = true) }
+            preferencesManager.saveSubscribedUsers(current)
+            // Drop any cached tasks from that user too.
+            val sharedNow = preferencesManager.sharedTasksFlow.firstOrNull()?.toMutableList() ?: mutableListOf()
+            sharedNow.removeIf { it.ownerUsername.equals(u, ignoreCase = true) }
+            preferencesManager.saveSharedTasks(sharedNow)
         }
     }
 
@@ -2374,6 +2478,34 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
                                                     val current = preferencesManager.groupTasksFlow.firstOrNull()?.toMutableList() ?: mutableListOf()
                                                     current.removeIf { it.id == taskId }
                                                     preferencesManager.saveGroupTasks(current)
+                                                }
+                                            }
+                                        } catch (e: Exception) { e.printStackTrace() }
+                                    } else if (chatMsg.id.startsWith("shared_task_upsert_")) {
+                                        try {
+                                            val shared = Json.decodeFromString<SharedTask>(chatMsg.text)
+                                            val subscribed = preferencesManager.subscribedUsersFlow.firstOrNull() ?: emptyList()
+                                            if (subscribed.any { it.equals(shared.ownerUsername, ignoreCase = true) }) {
+                                                withContext(Dispatchers.Main) {
+                                                    val list = preferencesManager.sharedTasksFlow.firstOrNull()?.toMutableList() ?: mutableListOf()
+                                                    val idx = list.indexOfFirst {
+                                                        it.ownerUsername.equals(shared.ownerUsername, ignoreCase = true) && it.taskId == shared.taskId
+                                                    }
+                                                    if (idx != -1) list[idx] = shared else list.add(shared)
+                                                    preferencesManager.saveSharedTasks(list)
+                                                }
+                                            }
+                                        } catch (e: Exception) { e.printStackTrace() }
+                                    } else if (chatMsg.id.startsWith("shared_task_delete_")) {
+                                        try {
+                                            val parts = chatMsg.text.split("|")
+                                            val owner = parts.getOrNull(0)?.lowercase() ?: ""
+                                            val taskId = parts.getOrNull(1)?.toIntOrNull() ?: -1
+                                            if (owner.isNotEmpty() && taskId != -1) {
+                                                withContext(Dispatchers.Main) {
+                                                    val list = preferencesManager.sharedTasksFlow.firstOrNull()?.toMutableList() ?: mutableListOf()
+                                                    list.removeIf { it.ownerUsername.equals(owner, ignoreCase = true) && it.taskId == taskId }
+                                                    preferencesManager.saveSharedTasks(list)
                                                 }
                                             }
                                         } catch (e: Exception) { e.printStackTrace() }

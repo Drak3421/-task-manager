@@ -406,6 +406,83 @@ fun TaskEntryScreen(
                     }
                 }
         }
+
+        // Shared Users Card — read-only view of other users' alarms.
+        val subscribedUsers by viewModel.subscribedUsers.collectAsState()
+        var newUsername by remember { mutableStateOf("") }
+        Card(
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+            ),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text("See Other Users' Alarms", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    "Add a username to see their alarms in your list (read-only).",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+
+                if (subscribedUsers.isNotEmpty()) {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        subscribedUsers.forEach { user ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(MaterialTheme.colorScheme.surface)
+                                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(user, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                                IconButton(
+                                    onClick = { viewModel.unsubscribeFromUser(user) },
+                                    modifier = Modifier.size(32.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Rounded.Remove,
+                                        contentDescription = "Remove",
+                                        tint = MaterialTheme.colorScheme.error,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(10.dp))
+                }
+
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    TextField(
+                        value = newUsername,
+                        onValueChange = { newUsername = it },
+                        placeholder = { Text("Username") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f),
+                        colors = TextFieldDefaults.colors(
+                            focusedContainerColor = MaterialTheme.colorScheme.surface,
+                            unfocusedContainerColor = MaterialTheme.colorScheme.surface,
+                            unfocusedIndicatorColor = Color.Transparent,
+                            focusedIndicatorColor = Color.Transparent
+                        )
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Button(
+                        onClick = {
+                            viewModel.subscribeToUser(newUsername) { ok, err ->
+                                if (ok) newUsername = ""
+                                else err?.let { android.widget.Toast.makeText(context, it, android.widget.Toast.LENGTH_SHORT).show() }
+                            }
+                        },
+                        enabled = newUsername.isNotBlank()
+                    ) { Text("Add") }
+                }
+            }
+        }
     }
 
     if (showSoundPickerDialog) {
