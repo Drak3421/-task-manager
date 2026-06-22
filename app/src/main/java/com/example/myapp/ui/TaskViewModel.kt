@@ -2419,6 +2419,36 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
                                             } ?: emptyList()
                                             preferencesManager.saveChatMessages(currentMessages)
                                         }
+                                    } else if (chatMsg.id.startsWith("profile_pic_update_")) {
+                                        val sender = chatMsg.sender
+                                        viewModelScope.launch(Dispatchers.IO) {
+                                            val context = getApplication<Application>()
+                                            val remotePic = getRemoteValueChunked("profile_pic_${sender.lowercase()}")
+                                            val dir = File(context.filesDir, "profile_pics")
+                                            if (!dir.exists()) dir.mkdirs()
+                                            val file = File(dir, "${sender.lowercase()}.jpg")
+                                            if (remotePic.isNotEmpty()) {
+                                                try {
+                                                    val bytes = android.util.Base64.decode(
+                                                        remotePic,
+                                                        android.util.Base64.URL_SAFE or android.util.Base64.NO_WRAP or android.util.Base64.NO_PADDING
+                                                    )
+                                                    file.writeBytes(bytes)
+                                                    withContext(Dispatchers.Main) {
+                                                        _profileUpdateTrigger.value = System.currentTimeMillis()
+                                                    }
+                                                } catch (e: Exception) {
+                                                    e.printStackTrace()
+                                                }
+                                            } else {
+                                                if (file.exists()) {
+                                                    file.delete()
+                                                    withContext(Dispatchers.Main) {
+                                                        _profileUpdateTrigger.value = System.currentTimeMillis()
+                                                    }
+                                                }
+                                            }
+                                        }
                                     } else if (chatMsg.id.startsWith("force_logout_")) {
                                         withContext(Dispatchers.Main) {
                                             preferencesManager.saveMyUsername("")
@@ -2769,6 +2799,16 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
                     
                     // Update remote key-value storage using chunked upload
                     updateRemoteValueChunked("profile_pic_${myName.lowercase()}", base64Str)
+                    
+                    // Notify all friends about the profile picture change
+                    try {
+                        val localFriends = preferencesManager.friendsFlow.firstOrNull() ?: emptyList()
+                        localFriends.forEach { friend ->
+                            sendSseSignal(friend.username, "profile_pic_update")
+                        }
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
                     
                     // Trigger state refresh
                     withContext(Dispatchers.Main) {
