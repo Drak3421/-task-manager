@@ -43,6 +43,7 @@ class PreferencesManager(private val context: Context) {
         val SENT_REQUESTS_KEY = stringPreferencesKey("sent_requests_json")
         val LAST_EVENT_TIME_KEY = longPreferencesKey("last_event_time")
         val ACTIVE_APP_ICON_KEY = stringPreferencesKey("active_app_icon")
+        val SHORTCUT_POSITIONS_KEY = stringPreferencesKey("shortcut_positions_json")
         val TASK_GROUPS_KEY = stringPreferencesKey("task_groups_json")
         val GROUP_TASKS_KEY = stringPreferencesKey("group_tasks_json")
         val PLAYER_FLOAT_ENABLED_KEY = booleanPreferencesKey("player_float_enabled")
@@ -497,6 +498,26 @@ class PreferencesManager(private val context: Context) {
     suspend fun saveActiveAppIcon(iconName: String) {
         context.dataStore.edit { preferences ->
             preferences[ACTIVE_APP_ICON_KEY] = iconName
+        }
+    }
+
+    val shortcutPositionsFlow: Flow<Map<String, String>> = context.dataStore.data
+        .catch { exception ->
+            if (exception is IOException) emit(emptyPreferences())
+            else throw exception
+        }
+        .map { preferences ->
+            val json = preferences[SHORTCUT_POSITIONS_KEY] ?: "{}"
+            try {
+                Json.decodeFromString<Map<String, String>>(json)
+            } catch (e: Exception) {
+                emptyMap()
+            }
+        }
+
+    suspend fun saveShortcutPositions(positions: Map<String, String>) {
+        context.dataStore.edit { preferences ->
+            preferences[SHORTCUT_POSITIONS_KEY] = Json.encodeToString(positions)
         }
     }
 }

@@ -47,6 +47,12 @@ import com.example.myapp.data.SharedTask
 import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
 import java.util.*
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.ui.res.painterResource
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -231,24 +237,70 @@ fun HomeScreen(
                 )
 
                 // Quick-access shortcut tiles
+                val shortcutPositions by viewModel.shortcutPositions.collectAsState()
+                
                 val shortcuts = listOf(
-                    ShortcutItem("Friends", Icons.Rounded.People,
-                        listOf(Color(0xFF0A84FF), Color(0xFF5AC8FA)), onNavigateToFriends),
-                    ShortcutItem("YouTube", Icons.Rounded.Subscriptions,
-                        listOf(Color(0xFFFF3B30), Color(0xFFFF6961)), onNavigateToYoutubeUpdates),
-                    ShortcutItem("News", Icons.Rounded.Newspaper,
-                        listOf(Color(0xFF5856D6), Color(0xFFAF52DE)), onNavigateToNewsUpdates),
-                    ShortcutItem("Browser", Icons.Rounded.Language,
-                        listOf(Color(0xFF34C759), Color(0xFF30D158)), onNavigateToBrowser),
-                    ShortcutItem("Music", Icons.Rounded.MusicNote,
-                        listOf(Color(0xFFFF2D55), Color(0xFFFF375F)), onNavigateToMusicLibrary)
+                    ShortcutItem("Friends", com.example.myapp.R.drawable.ic_shortcut_friends, onNavigateToFriends),
+                    ShortcutItem("Groups", com.example.myapp.R.drawable.ic_shortcut_groups, onNavigateToGroupTasks),
+                    ShortcutItem("YouTube", com.example.myapp.R.drawable.ic_shortcut_youtube, onNavigateToYoutubeUpdates),
+                    ShortcutItem("News", com.example.myapp.R.drawable.ic_shortcut_news, onNavigateToNewsUpdates),
+                    ShortcutItem("Browser", com.example.myapp.R.drawable.ic_shortcut_browser, onNavigateToBrowser),
+                    ShortcutItem("Music", com.example.myapp.R.drawable.ic_shortcut_music, onNavigateToMusicLibrary)
                 )
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    shortcuts.chunked(3).forEach { rowItems ->
-                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            rowItems.forEach { item ->
-                                ShortcutTile(item = item, modifier = Modifier.weight(1f))
+
+                BoxWithConstraints(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(260.dp)
+                        .background(
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.15f),
+                            shape = RoundedCornerShape(16.dp)
+                        )
+                ) {
+                    val density = androidx.compose.ui.platform.LocalDensity.current
+                    val widthDp = maxWidth
+                    val heightDp = maxHeight
+                    val colWidth = widthDp / 3
+
+                    shortcuts.forEachIndexed { index, item ->
+                        val savedPos = shortcutPositions[item.label]
+                        var offsetState by remember(savedPos) {
+                            val parsed = savedPos?.split(",")?.mapNotNull { it.toFloatOrNull() }
+                            if (parsed != null && parsed.size == 2) {
+                                mutableStateOf(Offset(parsed[0], parsed[1]))
+                            } else {
+                                val col = index % 3
+                                val row = index / 3
+                                val defaultX = with(density) { (col * colWidth.toPx() + (colWidth.toPx() - 80.dp.toPx()) / 2).toDp().value }
+                                val defaultY = (10 + row * 120).toFloat()
+                                mutableStateOf(Offset(defaultX, defaultY))
                             }
+                        }
+
+                        Box(
+                            modifier = Modifier
+                                .offset(
+                                    x = offsetState.x.dp,
+                                    y = offsetState.y.dp
+                                )
+                                .pointerInput(Unit) {
+                                    detectDragGestures(
+                                        onDrag = { change, dragAmount ->
+                                            change.consume()
+                                            val dragX = with(density) { dragAmount.x.toDp().value }
+                                            val dragY = with(density) { dragAmount.y.toDp().value }
+                                            val newX = (offsetState.x + dragX).coerceIn(0f, (widthDp.value - 80f).coerceAtLeast(0f))
+                                            val newY = (offsetState.y + dragY).coerceIn(0f, (heightDp.value - 100f).coerceAtLeast(0f))
+                                            offsetState = Offset(newX, newY)
+                                        },
+                                        onDragEnd = {
+                                            viewModel.saveShortcutPosition(item.label, offsetState.x, offsetState.y)
+                                        }
+                                    )
+                                }
+                                .width(80.dp)
+                        ) {
+                            ShortcutTile(item = item)
                         }
                     }
                 }
@@ -510,8 +562,7 @@ private fun greetingForHour(hour: Int): String = when (hour) {
 
 data class ShortcutItem(
     val label: String,
-    val icon: ImageVector,
-    val gradient: List<Color>,
+    val iconRes: Int,
     val onClick: () -> Unit
 )
 
@@ -594,22 +645,14 @@ fun ShortcutTile(item: ShortcutItem, modifier: Modifier = Modifier) {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        Box(
+        Image(
+            painter = painterResource(id = item.iconRes),
+            contentDescription = item.label,
             modifier = Modifier
-                .size(56.dp)
-                .clip(RoundedCornerShape(16.dp))
-                .background(
-                    androidx.compose.ui.graphics.Brush.linearGradient(item.gradient)
-                ),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                imageVector = item.icon,
-                contentDescription = item.label,
-                tint = Color.White,
-                modifier = Modifier.size(28.dp)
-            )
-        }
+                .size(64.dp)
+                .clip(RoundedCornerShape(16.dp)),
+            contentScale = ContentScale.Crop
+        )
         Spacer(modifier = Modifier.height(8.dp))
         Text(
             text = item.label,

@@ -232,6 +232,9 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
     val friends = preferencesManager.friendsFlow
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    val shortcutPositions = preferencesManager.shortcutPositionsFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
+
     val chatMessages = preferencesManager.chatMessagesFlow
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
@@ -3658,6 +3661,14 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
             .setContentIntent(pendingIntent)
             
         notificationManager.notify(title.hashCode(), builder.build())
+    }
+
+    fun saveShortcutPosition(label: String, x: Float, y: Float) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val currentMap = preferencesManager.shortcutPositionsFlow.firstOrNull()?.toMutableMap() ?: mutableMapOf()
+            currentMap[label] = "$x,$y"
+            preferencesManager.saveShortcutPositions(currentMap)
+        }
     }
 
     override fun onCleared() {
