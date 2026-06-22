@@ -44,6 +44,7 @@ class PreferencesManager(private val context: Context) {
         val LAST_EVENT_TIME_KEY = longPreferencesKey("last_event_time")
         val ACTIVE_APP_ICON_KEY = stringPreferencesKey("active_app_icon")
         val SHORTCUT_POSITIONS_KEY = stringPreferencesKey("shortcut_positions_json")
+        val DASHBOARD_BACKGROUND_EFFECT_KEY = stringPreferencesKey("dashboard_background_effect")
         val TASK_GROUPS_KEY = stringPreferencesKey("task_groups_json")
         val GROUP_TASKS_KEY = stringPreferencesKey("group_tasks_json")
         val PLAYER_FLOAT_ENABLED_KEY = booleanPreferencesKey("player_float_enabled")
@@ -518,6 +519,21 @@ class PreferencesManager(private val context: Context) {
     suspend fun saveShortcutPositions(positions: Map<String, String>) {
         context.dataStore.edit { preferences ->
             preferences[SHORTCUT_POSITIONS_KEY] = Json.encodeToString(positions)
+        }
+    }
+
+    val dashboardBackgroundEffectFlow: Flow<String> = context.dataStore.data
+        .catch { exception ->
+            if (exception is IOException) emit(emptyPreferences())
+            else throw exception
+        }
+        .map { preferences ->
+            preferences[DASHBOARD_BACKGROUND_EFFECT_KEY] ?: "translucent"
+        }
+
+    suspend fun saveDashboardBackgroundEffect(effect: String) {
+        context.dataStore.edit { preferences ->
+            preferences[DASHBOARD_BACKGROUND_EFFECT_KEY] = effect
         }
     }
 }

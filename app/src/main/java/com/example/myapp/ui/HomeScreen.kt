@@ -48,11 +48,19 @@ import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
 import java.util.*
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.ui.res.painterResource
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.material.icons.rounded.Palette
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.border
+import androidx.compose.ui.zIndex
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -248,59 +256,171 @@ fun HomeScreen(
                     ShortcutItem("Music", com.example.myapp.R.drawable.ic_shortcut_music, onNavigateToMusicLibrary)
                 )
 
-                BoxWithConstraints(
+                val bgEffect by viewModel.dashboardBackgroundEffect.collectAsState()
+                var showMenu by remember { mutableStateOf(false) }
+
+                val backgroundModifier = when (bgEffect) {
+                    "translucent" -> Modifier
+                        .background(
+                            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.4f),
+                            shape = RoundedCornerShape(16.dp)
+                        )
+                        .border(
+                            width = 1.dp,
+                            color = if (isSystemInDarkTheme()) Color.White.copy(alpha = 0.15f) else Color.Black.copy(alpha = 0.1f),
+                            shape = RoundedCornerShape(16.dp)
+                        )
+                    "gradient" -> Modifier
+                        .background(
+                            brush = Brush.linearGradient(
+                                colors = listOf(
+                                    Color(0xFFE040FB),
+                                    Color(0xFFF50057),
+                                    Color(0xFFFF6E40)
+                                )
+                            ),
+                            shape = RoundedCornerShape(16.dp)
+                        )
+                    "neon" -> Modifier
+                        .background(
+                            color = if (isSystemInDarkTheme()) Color(0xFF121212) else Color(0xFFFAFAFA),
+                            shape = RoundedCornerShape(16.dp)
+                        )
+                        .border(
+                            width = 2.dp,
+                            brush = Brush.linearGradient(
+                                colors = listOf(
+                                    Color(0xFF00E5FF),
+                                    Color(0xFFD500F9)
+                                )
+                            ),
+                            shape = RoundedCornerShape(16.dp)
+                        )
+                    else -> Modifier // "solid"
+                        .background(
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+                            shape = RoundedCornerShape(16.dp)
+                        )
+                }
+
+                Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(260.dp)
-                        .background(
-                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.15f),
-                            shape = RoundedCornerShape(16.dp)
-                        )
+                        .then(backgroundModifier)
                 ) {
-                    val density = androidx.compose.ui.platform.LocalDensity.current
-                    val widthDp = maxWidth
-                    val heightDp = maxHeight
-                    val colWidth = widthDp / 3
+                    BoxWithConstraints(
+                        modifier = Modifier.fillMaxSize()
+                    ) {
+                        val density = androidx.compose.ui.platform.LocalDensity.current
+                        val widthDp = maxWidth
+                        val heightDp = maxHeight
+                        val colWidth = widthDp / 3
 
-                    shortcuts.forEachIndexed { index, item ->
-                        val savedPos = shortcutPositions[item.label]
-                        var offsetState by remember(savedPos) {
-                            val parsed = savedPos?.split(",")?.mapNotNull { it.toFloatOrNull() }
-                            if (parsed != null && parsed.size == 2) {
-                                mutableStateOf(Offset(parsed[0], parsed[1]))
-                            } else {
-                                val col = index % 3
-                                val row = index / 3
-                                val defaultX = with(density) { (col * colWidth.toPx() + (colWidth.toPx() - 80.dp.toPx()) / 2).toDp().value }
-                                val defaultY = (10 + row * 120).toFloat()
-                                mutableStateOf(Offset(defaultX, defaultY))
+                        shortcuts.forEachIndexed { index, item ->
+                            val savedPos = shortcutPositions[item.label]
+                            var offsetState by remember(savedPos) {
+                                val parsed = savedPos?.split(",")?.mapNotNull { it.toFloatOrNull() }
+                                if (parsed != null && parsed.size == 2) {
+                                    mutableStateOf(Offset(parsed[0], parsed[1]))
+                                } else {
+                                    val col = index % 3
+                                    val row = index / 3
+                                    val defaultX = with(density) { (col * colWidth.toPx() + (colWidth.toPx() - 80.dp.toPx()) / 2).toDp().value }
+                                    val defaultY = (10 + row * 120).toFloat()
+                                    mutableStateOf(Offset(defaultX, defaultY))
+                                }
+                            }
+
+                            var isDragging by remember { mutableStateOf(false) }
+                            val scale by animateFloatAsState(targetValue = if (isDragging) 1.15f else 1f)
+
+                            Box(
+                                modifier = Modifier
+                                    .offset(
+                                        x = offsetState.x.dp,
+                                        y = offsetState.y.dp
+                                    )
+                                    .zIndex(if (isDragging) 10f else 1f)
+                                    .graphicsLayer(
+                                        scaleX = scale,
+                                        scaleY = scale
+                                    )
+                                    .pointerInput(Unit) {
+                                        detectDragGesturesAfterLongPress(
+                                            onDragStart = { isDragging = true },
+                                            onDrag = { change, dragAmount ->
+                                                change.consume()
+                                                val dragX = with(density) { dragAmount.x.toDp().value }
+                                                val dragY = with(density) { dragAmount.y.toDp().value }
+                                                val newX = (offsetState.x + dragX).coerceIn(0f, (widthDp.value - 80f).coerceAtLeast(0f))
+                                                val newY = (offsetState.y + dragY).coerceIn(0f, (heightDp.value - 100f).coerceAtLeast(0f))
+                                                offsetState = Offset(newX, newY)
+                                            },
+                                            onDragEnd = {
+                                                isDragging = false
+                                                viewModel.saveShortcutPosition(item.label, offsetState.x, offsetState.y)
+                                            },
+                                            onDragCancel = {
+                                                isDragging = false
+                                            }
+                                        )
+                                    }
+                                    .width(80.dp)
+                            ) {
+                                ShortcutTile(item = item)
                             }
                         }
+                    }
 
-                        Box(
-                            modifier = Modifier
-                                .offset(
-                                    x = offsetState.x.dp,
-                                    y = offsetState.y.dp
-                                )
-                                .pointerInput(Unit) {
-                                    detectDragGestures(
-                                        onDrag = { change, dragAmount ->
-                                            change.consume()
-                                            val dragX = with(density) { dragAmount.x.toDp().value }
-                                            val dragY = with(density) { dragAmount.y.toDp().value }
-                                            val newX = (offsetState.x + dragX).coerceIn(0f, (widthDp.value - 80f).coerceAtLeast(0f))
-                                            val newY = (offsetState.y + dragY).coerceIn(0f, (heightDp.value - 100f).coerceAtLeast(0f))
-                                            offsetState = Offset(newX, newY)
-                                        },
-                                        onDragEnd = {
-                                            viewModel.saveShortcutPosition(item.label, offsetState.x, offsetState.y)
-                                        }
-                                    )
-                                }
-                                .width(80.dp)
+                    // Palette Menu Button at top-right
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(4.dp)
+                    ) {
+                        IconButton(
+                            onClick = { showMenu = true }
                         ) {
-                            ShortcutTile(item = item)
+                            Icon(
+                                imageVector = Icons.Rounded.Palette,
+                                contentDescription = "Dashboard Theme",
+                                tint = if (bgEffect == "gradient") Color.White else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+
+                        DropdownMenu(
+                            expanded = showMenu,
+                            onDismissRequest = { showMenu = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("Translucent Glass") },
+                                onClick = {
+                                    viewModel.saveDashboardBackgroundEffect("translucent")
+                                    showMenu = false
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Sunset Gradient") },
+                                onClick = {
+                                    viewModel.saveDashboardBackgroundEffect("gradient")
+                                    showMenu = false
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Neon Glow Border") },
+                                onClick = {
+                                    viewModel.saveDashboardBackgroundEffect("neon")
+                                    showMenu = false
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Minimalist Solid") },
+                                onClick = {
+                                    viewModel.saveDashboardBackgroundEffect("solid")
+                                    showMenu = false
+                                }
+                            )
                         }
                     }
                 }

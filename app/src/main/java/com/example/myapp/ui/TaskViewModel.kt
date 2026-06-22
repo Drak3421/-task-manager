@@ -235,6 +235,9 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
     val shortcutPositions = preferencesManager.shortcutPositionsFlow
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
 
+    val dashboardBackgroundEffect = preferencesManager.dashboardBackgroundEffectFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "translucent")
+
     val chatMessages = preferencesManager.chatMessagesFlow
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
@@ -3668,6 +3671,12 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
             val currentMap = preferencesManager.shortcutPositionsFlow.firstOrNull()?.toMutableMap() ?: mutableMapOf()
             currentMap[label] = "$x,$y"
             preferencesManager.saveShortcutPositions(currentMap)
+        }
+    }
+
+    fun saveDashboardBackgroundEffect(effect: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            preferencesManager.saveDashboardBackgroundEffect(effect)
         }
     }
 
