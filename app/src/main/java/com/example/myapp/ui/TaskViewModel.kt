@@ -1081,8 +1081,14 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
             val currentTopicId = selectedNewsTopicId.value ?: topicsList.firstOrNull()?.id
             val topic = topicsList.find { it.id == currentTopicId }
             val query = topic?.query ?: "Artificial Intelligence"
+            
+            // Fetch news
             val articles = AiNewsParser.fetchAiNews(query)
             _aiNewsArticles.value = articles.sortedByDescending { it.timestampMs }
+            
+            // Fetch YouTube videos
+            searchYouTubeVideos(query, "IN")
+            
             _isAiNewsRefreshing.value = false
         }
     }

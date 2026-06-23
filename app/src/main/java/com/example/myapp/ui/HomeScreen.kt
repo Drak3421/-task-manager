@@ -47,20 +47,14 @@ import com.example.myapp.data.SharedTask
 import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
 import java.util.*
-import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.unit.IntOffset
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.ui.res.painterResource
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.material.icons.rounded.Palette
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.foundation.border
-import androidx.compose.ui.zIndex
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.interaction.collectIsDraggedAsState
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.foundation.gestures.scrollBy
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -323,8 +317,290 @@ fun HomeScreen(
                     color = MaterialTheme.colorScheme.onBackground,
                     modifier = Modifier.padding(top = 20.dp, bottom = 16.dp)
                 )
+                // News topic selection chips
+                val newsTopics by viewModel.newsTopics.collectAsState()
+                val selectedTopicId by viewModel.selectedNewsTopicId.collectAsState()
+                val newsArticles by viewModel.filteredNewsArticles.collectAsState()
+                val youtubeVideos by viewModel.searchedVideos.collectAsState()
 
+                val newsListState = rememberLazyListState()
+                val youtubeListState = rememberLazyListState()
 
+                val newsPressed by newsListState.interactionSource.collectIsPressedAsState()
+                val newsDragged by newsListState.interactionSource.collectIsDraggedAsState()
+
+                val youtubePressed by youtubeListState.interactionSource.collectIsPressedAsState()
+                val youtubeDragged by youtubeListState.interactionSource.collectIsDraggedAsState()
+
+                // Smooth Auto-scrolling for News Articles
+                LaunchedEffect(newsArticles, newsPressed, newsDragged) {
+                    if (newsArticles.isNotEmpty() && !newsPressed && !newsDragged) {
+                        delay(3000)
+                        while (true) {
+                            try {
+                                newsListState.scroll {
+                                    while (true) {
+                                        if (!newsListState.canScrollForward) {
+                                            break
+                                        }
+                                        scrollBy(1f)
+                                        delay(35)
+                                    }
+                                }
+                                if (!newsListState.canScrollForward) {
+                                    delay(3000)
+                                    newsListState.scrollToItem(0)
+                                }
+                            } catch (e: Exception) {
+                                delay(5000)
+                            }
+                        }
+                    }
+                }
+
+                // Smooth Auto-scrolling for YouTube Videos
+                LaunchedEffect(youtubeVideos, youtubePressed, youtubeDragged) {
+                    if (youtubeVideos.isNotEmpty() && !youtubePressed && !youtubeDragged) {
+                        delay(3000)
+                        while (true) {
+                            try {
+                                youtubeListState.scroll {
+                                    while (true) {
+                                        if (!youtubeListState.canScrollForward) {
+                                            break
+                                        }
+                                        scrollBy(1f)
+                                        delay(35)
+                                    }
+                                }
+                                if (!youtubeListState.canScrollForward) {
+                                    delay(3000)
+                                    youtubeListState.scrollToItem(0)
+                                }
+                            } catch (e: Exception) {
+                                delay(5000)
+                            }
+                        }
+                    }
+                }
+
+                if (newsTopics.isNotEmpty()) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState())
+                            .padding(vertical = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        newsTopics.forEach { topic ->
+                            val isSelected = topic.id == selectedTopicId
+                            FilterChip(
+                                selected = isSelected,
+                                onClick = { viewModel.selectNewsTopic(topic.id) },
+                                label = { Text(topic.query, fontSize = 11.sp, fontWeight = FontWeight.Medium) },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.9f),
+                                    selectedLabelColor = Color.White
+                                ),
+                                shape = RoundedCornerShape(20.dp)
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
+                }
+
+                // News & YouTube updates side-by-side
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(240.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    // Left panel: News updates
+                    Card(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight(),
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+                        )
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(8.dp)
+                        ) {
+                            Text(
+                                text = "LATEST NEWS",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.padding(bottom = 6.dp)
+                            )
+                            if (newsArticles.isEmpty()) {
+                                Box(
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                                }
+                            } else {
+                                LazyColumn(
+                                    state = newsListState,
+                                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                                    modifier = Modifier.fillMaxSize()
+                                ) {
+                                    items(newsArticles) { article ->
+                                        val context = LocalContext.current
+                                        Card(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clickable {
+                                                    try {
+                                                        viewModel.openNewsArticle(article)
+                                                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(article.link))
+                                                        context.startActivity(intent)
+                                                    } catch (e: Exception) {
+                                                        Toast.makeText(context, "Could not open link", Toast.LENGTH_SHORT).show()
+                                                    }
+                                                },
+                                            shape = RoundedCornerShape(8.dp),
+                                            colors = CardDefaults.cardColors(
+                                                containerColor = MaterialTheme.colorScheme.surface
+                                            )
+                                        ) {
+                                            Column(
+                                                modifier = Modifier.padding(8.dp)
+                                            ) {
+                                                Text(
+                                                    text = article.title,
+                                                    fontSize = 11.sp,
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    maxLines = 2,
+                                                    overflow = TextOverflow.Ellipsis,
+                                                    color = MaterialTheme.colorScheme.onSurface
+                                                )
+                                                Spacer(modifier = Modifier.height(4.dp))
+                                                Row(
+                                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                                    modifier = Modifier.fillMaxWidth()
+                                                ) {
+                                                    Text(
+                                                        text = article.source,
+                                                        fontSize = 8.sp,
+                                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Right panel: YouTube videos
+                    Card(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight(),
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+                        )
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(8.dp)
+                        ) {
+                            Text(
+                                text = "YOUTUBE VIDEOS",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.padding(bottom = 6.dp)
+                            )
+                            if (youtubeVideos.isEmpty()) {
+                                Box(
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                                }
+                            } else {
+                                LazyColumn(
+                                    state = youtubeListState,
+                                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                                    modifier = Modifier.fillMaxSize()
+                                ) {
+                                    items(youtubeVideos) { video ->
+                                        val context = LocalContext.current
+                                        Card(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clickable {
+                                                    viewModel.openYouTubeVideo(video)
+                                                    try {
+                                                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/watch?v=${video.videoId}")).apply {
+                                                            setPackage("com.google.android.youtube")
+                                                        }
+                                                        context.startActivity(intent)
+                                                    } catch (e: Exception) {
+                                                        val webIntent = Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/watch?v=${video.videoId}"))
+                                                        context.startActivity(webIntent)
+                                                    }
+                                                },
+                                            shape = RoundedCornerShape(8.dp),
+                                            colors = CardDefaults.cardColors(
+                                                containerColor = MaterialTheme.colorScheme.surface
+                                            )
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.padding(6.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Image(
+                                                    painter = rememberAsyncImagePainter(model = video.thumbnailUrl),
+                                                    contentDescription = "Thumbnail",
+                                                    contentScale = ContentScale.Crop,
+                                                    modifier = Modifier
+                                                        .size(54.dp, 32.dp)
+                                                        .clip(RoundedCornerShape(4.dp))
+                                                )
+                                                Spacer(modifier = Modifier.width(6.dp))
+                                                Column(
+                                                    modifier = Modifier.weight(1f)
+                                                ) {
+                                                    Text(
+                                                        text = video.title,
+                                                        fontSize = 10.sp,
+                                                        fontWeight = FontWeight.SemiBold,
+                                                        maxLines = 2,
+                                                        overflow = TextOverflow.Ellipsis,
+                                                        color = MaterialTheme.colorScheme.onSurface
+                                                    )
+                                                    Spacer(modifier = Modifier.height(2.dp))
+                                                    Text(
+                                                        text = video.channelName,
+                                                        fontSize = 8.sp,
+                                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
 
                 Row(
                     modifier = Modifier
